@@ -1,0 +1,22 @@
+kind: wasmer.io/App.v0
+owner: nexuss0781
+name: filesystem-kit
+package: .
+
+env:
+  FILESYSTEM_ROOT: /data
+
+volumes:
+  - name: data
+    mount: /data
+
+health_checks:
+  - http:
+      method: get
+      path: /health
+      interval: 30s
+      timeout: 10s
+      unhealthy_threshold: 2
+      healthy_threshold: 1
+      expected_status_codes:
+        - 200
