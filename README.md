@@ -75,6 +75,18 @@ The server binds to `0.0.0.0` for deployment platforms. Every requested path is 
 
 The server returns JSON for mutations, listings, searches, health, and errors. `/api/read` returns the file content as `text/plain`.
 
+### Wasmer Edge persistence
+
+The repository includes [`app.yaml`](app.yaml) with a Wasmer persistent volume mounted at `/data`. The deployment sets `FILESYSTEM_ROOT=/data`, so files created through the API survive instance restarts, deployments, and scale-out. A plain deployment without this volume will have an ephemeral `/app` filesystem and cannot provide reliable multi-request file operations; this is the same limitation found on many serverless platforms, including Vercel functions.
+
+Deploy with the Wasmer CLI from the repository root:
+
+```bash
+wasmer deploy
+```
+
+After deployment, verify `/health`, then exercise write/read/modify/grep/glob/list/delete as normal.
+
 ## Development
 
 ```bash
