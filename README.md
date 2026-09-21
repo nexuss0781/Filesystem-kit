@@ -52,6 +52,29 @@ fsk delete build --recursive
 
 CLI results are JSON except for `read`, which writes file content directly to stdout. Errors are sent to stderr with a non-zero exit code.
 
+## HTTP server
+
+The package also includes an Express server for coding agents and remote tooling:
+
+```bash
+FILESYSTEM_ROOT=/workspace PORT=3000 npm start
+```
+
+The server binds to `0.0.0.0` for deployment platforms. Every requested path is confined to `FILESYSTEM_ROOT` (which defaults to the current working directory); traversal outside that root is rejected with HTTP 403. The available endpoints are:
+
+| Method | Endpoint | Body or query |
+| --- | --- | --- |
+| `GET` | `/health` | Service status and configured root. |
+| `GET` | `/api/read` | `path`, optional `head`, `tail`, `start`, `end`. |
+| `PUT` | `/api/write` | JSON: `path`, `content`, optional `append`, `range`. |
+| `PATCH` | `/api/modify` | JSON: `path`, `match`, `replacement`, `occurrence`, or `rewrite` and `range`. |
+| `DELETE` | `/api/delete` | `path`, optional `recursive`, `force`. |
+| `GET` | `/api/list` | `path`, optional `all`. |
+| `GET` | `/api/glob` | `pattern`, optional `cwd`, `all`. |
+| `GET` | `/api/grep` | `pattern`, optional `path`, `ignoreCase`, `all`. |
+
+The server returns JSON for mutations, listings, searches, health, and errors. `/api/read` returns the file content as `text/plain`.
+
 ## Development
 
 ```bash

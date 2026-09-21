@@ -10,11 +10,15 @@
   },
   "scripts": {
     "test": "node --test",
-    "lint": "node --check src/index.js && node --check src/cli.js"
+    "lint": "node --check src/index.js && node --check src/cli.js && node --check src/server.js",
+    "start": "node src/server.js"
   },
   "engines": {
     "node": ">=20"
   },
   "license": "MIT",
-  "keywords": ["filesystem", "files", "coding-agent", "cli", "automation"]
+  "keywords": ["filesystem", "files", "coding-agent", "cli", "automation"],
+  "dependencies": {
+    "express": "^5.1.0"
+  }
 }
