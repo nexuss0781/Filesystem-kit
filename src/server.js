@@ -39,7 +39,7 @@ function publicResult(result) {
   return result && result.path ? { ...result, path: publicPath(result.path) } : result;
 }
 
-app.get('/health', (_request, response) => response.json({ status: 'ok', root: publicPath(root), service: 'filesystem-kit' }));
+app.get('/health', (_request, response) => response.json({ status: 'ok', root: process.env.FILESYSTEM_ROOT || root, service: 'filesystem-kit' }));
 
 app.get('/api/read', async (request, response, next) => {
   try {

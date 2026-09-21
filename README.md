@@ -77,7 +77,7 @@ The server returns JSON for mutations, listings, searches, health, and errors. `
 
 ### Wasmer Edge persistence
 
-The repository includes [`app.yaml`](app.yaml) with a Wasmer persistent volume mounted at `/data`. The deployment sets `FILESYSTEM_ROOT=/data`, so files created through the API survive instance restarts, deployments, and scale-out. A plain deployment without this volume will have an ephemeral `/app` filesystem and cannot provide reliable multi-request file operations; this is the same limitation found on many serverless platforms, including Vercel functions.
+The repository includes [`app.yaml`](app.yaml) with a Wasmer persistent volume mounted at `/home/ubuntu`. The deployment sets `FILESYSTEM_ROOT=/home/ubuntu`, so API paths behave like a conventional computer home directory while files survive instance restarts, deployments, and scale-out. This is the Wasmer container's `/home/ubuntu`, not the host machine's filesystem. A plain deployment without this volume will have an ephemeral `/app` filesystem and cannot provide reliable multi-request file operations; this is the same limitation found on many serverless platforms, including Vercel functions.
 
 Deploy with the Wasmer CLI from the repository root:
 

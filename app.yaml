@@ -4,11 +4,11 @@ name: filesystem-kit
 package: .
 
 env:
-  FILESYSTEM_ROOT: /data
+  FILESYSTEM_ROOT: /home/ubuntu
 
 volumes:
   - name: data
-    mount: /data
+    mount: /home/ubuntu
 
 health_checks:
   - http:
