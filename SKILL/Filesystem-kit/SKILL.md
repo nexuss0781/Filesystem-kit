@@ -1,138 +1,233 @@
 ---
 name: filesystem-kit
-description: Use the configured filesystem operations to read, write, edit, search, list, and delete files. Use when an agent needs to inspect or change files and folders.
+description: Read, write, edit, find and delete files and folders through the configured FileSystem Kit. Use whenever a task requires looking at, changing, or locating anything on disk — reading a file, patching one line, creating a file, listing a folder, globbing paths, searching contents, or removing something.
 ---
 
-# Filesystem operations
+# FileSystem Kit
 
-Use the configured FileSystem Kit interface for all local file and folder work. Do not invent paths, contents, or results. Operate only on the files needed for the current task.
+The machine you are working on. Its root is `/`, and every operation below
+resolves paths against that root.
 
-## Paths
+## The root is the machine
 
-- Treat the configured root as `/` for this interface. Use paths relative to that root, such as `src/app.js` or `notes/research.md`.
-- Do not use `..`, host-machine paths, or paths outside the configured root.
-- Use forward slashes.
-- Before changing a file, read the relevant part of it first unless the task explicitly provides the complete new content.
-- Keep paths exact. Do not silently change capitalization or file extensions.
+`/` is the configured root. It is not a folder inside a larger filesystem that
+you can step out of — it is the whole machine as far as this interface is
+concerned.
 
-## Read
+- Write `/src/app.js` and you mean the file at `<root>/src/app.js`.
+- `/` on its own is the root folder itself, and `list("/")` shows its contents.
+- `..` resolves the way it always does on a filesystem, and the result is still
+  required to be inside the root. A path that would leave the root is rejected
+  with `outside the root` before any disk access happens.
+- There is no host machine to name, no `/etc`, no `/tmp`, no `~`. If something
+  is not under `/`, it is not part of this machine.
 
-Read a whole file:
+Because the root is enforced rather than advisory, you never have to reason
+about whether a path is safe to touch. Every path that reaches a function is
+already inside the machine.
+
+Use forward slashes. Name files exactly as they are: the same capitalisation,
+the same extension.
+
+## Choosing the operation
+
+| You want to | Use |
+| --- | --- |
+| see a whole file | `read` |
+| see the start or end of a file | `read` with `head` or `tail` |
+| see or replace known lines | `read` / `write` with `range` |
+| change one exact piece of text | `modify` with `match` |
+| replace a span of lines with new text | `modify` with `rewrite` and `range` |
+| create a file, or replace a whole file | `write` |
+| add to the end of a file | `write` with `append` |
+| see what is in a folder | `list` |
+| find files by name | `glob` |
+| find files by what is inside them | `grep` |
+| remove a file or folder | `remove` |
+
+Reach for `modify` rather than `write` when you are changing something that
+already exists. `write` replaces a file from the first byte; `modify` changes
+only what you named and leaves every other byte alone.
+
+## Line addressing
+
+One rule, used by every line-based option, so a line number means the same thing
+everywhere:
+
+- Lines are **1-based**. Line 1 is the first line.
+- `end` is **inclusive**.
+- A trailing newline ends the last line; it does not begin an empty one. A file
+  containing `alpha\nbeta\n` has two lines.
+- `read` with `range` stops at the end of the file if `end` is past it.
+- `write` with `range` requires `end` to be within the file, and replaces
+  exactly lines `start` through `end`.
+
+## read
+
+Returns the file's text as a string.
+
+Whole file:
 
 ```json
-{"path":"src/app.js"}
+{"path": "src/app.js"}
 ```
 
-Read selected lines with a 1-based inclusive range:
+A line range, 1-based and inclusive:
 
 ```json
-{"path":"src/app.js","range":{"start":20,"end":45}}
+{"path": "src/app.js", "range": {"start": 20, "end": 45}}
 ```
 
-Read only the beginning or end:
+The first 40 lines, or the last 40:
 
 ```json
-{"path":"logs/app.log","head":40}
-{"path":"logs/app.log","tail":40}
+{"path": "logs/app.log", "head": 40}
+{"path": "logs/app.log", "tail": 40}
 ```
 
-Use only one of `range`, `head`, or `tail` per read. Prefer a range or head/tail for large files.
+`head`, `tail` and `range` are three ways to read part of a file. Use exactly one
+per read; passing two is an error. `tail` reads backwards from the end of the
+file in chunks, so the last lines of a large log cost no more than a short file.
 
-## Write
+## write
 
-Create or replace a file:
+Returns `{ "path", "bytes" }`. Parent folders are created as needed.
+
+Create or replace the whole file:
 
 ```json
-{"path":"notes/todo.md","content":"- Review results\n"}
+{"path": "notes/todo.md", "content": "- Review results\n"}
 ```
 
-Append to a file:
+Add to the end:
 
 ```json
-{"path":"notes/todo.md","content":"- Add tests\n","append":true}
+{"path": "notes/todo.md", "content": "- Add tests\n", "append": true}
 ```
 
-Replace existing lines without rewriting the rest:
+Replace lines 3 to 3 and keep the rest of the file:
 
 ```json
-{"path":"src/config.js","content":"export const mode = 'safe';","range":{"start":3,"end":3}}
+{"path": "src/config.js", "content": "export const mode = 'safe';", "range": {"start": 3, "end": 3}}
 ```
 
-Parent folders are created automatically. Use write for a complete replacement or for a deliberate append. Do not use append when the intended result is replacement.
+`append` and `range` are opposites — one adds to the end, the other rewrites the
+middle — so they cannot be combined. Choosing between them is part of the
+request: append when the new content belongs after the last line, range when it
+belongs at a specific line.
 
-## Edit
+## modify
+
+Returns `{ "path", "replacements": 1 }`.
 
 Replace one exact occurrence:
 
 ```json
-{"path":"src/app.js","match":"old text","replacement":"new text"}
+{"path": "src/app.js", "match": "old text", "replacement": "new text"}
 ```
 
-If the same text occurs more than once, select the intended occurrence explicitly:
+The same text appearing more than once is addressed by position:
 
 ```json
-{"path":"src/app.js","match":"TODO","replacement":"DONE","occurrence":2}
+{"path": "src/app.js", "match": "TODO", "replacement": "DONE", "occurrence": 2}
 ```
 
-Rewrite a selected line range:
+Rewriting a span of lines:
 
 ```json
-{"path":"src/app.js","rewrite":"new line 1\nnew line 2","range":{"start":10,"end":11}}
+{"path": "src/app.js", "rewrite": "new line 1\nnew line 2", "range": {"start": 10, "end": 11}}
 ```
 
-Use either `match` with `replacement`, or `rewrite` with an optional `range`; do not mix the two forms. An edit that reports no match must stop and inspect the file instead of trying a different replacement blindly.
+`modify` changes exactly one occurrence. That is deliberate: a text that appears
+twice usually means two different things in two places, and replacing all of
+them at once is how unrelated code gets broken. Choose `occurrence` to be
+specific, or use `rewrite` with a range when the change is positional rather
+than textual.
 
-## List and search
+If `match` is not present, the file is left untouched and the call reports
+`match not found`. Read the file and match what is actually there.
 
-List one folder:
+`rewrite` and `match` are different tools for different edits and cannot be
+combined in one call.
+
+## list
+
+Returns an array of `{ "name", "path", "type" }`, sorted by name. `type` is
+`file`, `directory`, or `other`.
 
 ```json
-{"path":"src"}
+{"path": "src"}
 ```
 
-Include hidden entries only when they are relevant:
+Dotfiles are left out of the listing. Include them when they matter:
 
 ```json
-{"path":".","all":true}
+{"path": ".", "all": true}
 ```
 
-Find paths with a simple pattern:
+## glob
+
+Returns an array of absolute path strings, sorted. Matches against paths
+relative to the folder being searched.
 
 ```json
-{"pattern":"src/**/*.js","cwd":"."}
+{"pattern": "src/**/*.js", "path": "."}
 ```
 
-Search file contents:
+- `*` matches within one segment, `?` matches exactly one character, and
+  `<double star>` matches any number of characters.
+- `<double star>/` spans zero or more folders. `src/<double star>.js` finds
+  `src/a.js`, `src/deep/b.js` and `src/deep/deeper/c.js` in one call, while
+  `src/*.js` finds only `src/a.js`.
+- `pattern` is matched against the path relative to the folder being searched,
+  so a leading `/` is optional and means the same thing.
+- `path` narrows where the search runs. Narrow it — a search with no `path`
+  walks the entire machine, `node_modules` included.
+
+## grep
+
+Returns an array of `{ "path", "line", "text" }` for every matching line.
 
 ```json
-{"pattern":"TODO","path":"src","ignoreCase":true}
+{"pattern": "TODO", "path": "src", "ignoreCase": true}
 ```
 
-`grep` returns matching file paths, line numbers, and line text. `glob` returns matching paths. Hidden files are excluded unless `all` is true. Prefer a narrow `path` or `cwd` over searching the whole root.
+- `pattern` is a regular expression, matched per line. Pass a `RegExp` directly
+  for flags the options do not cover.
+- `path` accepts a single file or a folder. Given a folder it searches
+  everything beneath it.
+- Dotfiles are skipped unless `all` is true.
+- Binary files are skipped automatically, so a search across a large tree is
+  safe to run.
 
-## Delete
+## remove
 
-Delete one file only after confirming the exact path:
+Returns `{ "path", "removed": true }`.
 
 ```json
-{"path":"tmp/output.txt"}
+{"path": "tmp/output.txt"}
 ```
 
-Delete a folder only when the task explicitly requires it and recursive deletion is intended:
+A folder needs `recursive`:
 
 ```json
-{"path":"tmp/cache","recursive":true}
+{"path": "tmp/cache", "recursive": true}
 ```
 
-Never use recursive deletion for an uncertain path. Treat deletion as irreversible.
+Deleting a folder without `recursive` fails instead of emptying it, so a folder
+is never half-deleted. Before a recursive delete, `list` the folder first: it is
+one call, and it is the difference between removing a build cache and removing
+the source.
 
-## Safe workflow
+## Working method
 
-1. Identify the exact path.
-2. Read the relevant content or list the relevant folder.
-3. Make the smallest write or edit that satisfies the task.
-4. Read the changed content again when correctness matters.
-5. Use grep or glob to verify related files when needed.
-6. Delete only temporary artifacts created for the current task.
+1. `list` or `glob` when you do not yet know the exact path.
+2. `read` the part of the file that the change belongs to.
+3. `modify` for an edit to existing content, `write` for a new file.
+4. `read` the changed lines back when the result has to be right.
 
-If an operation fails, use its error to correct the request. Do not retry a destructive operation without checking whether it already succeeded. Keep returned file content and paths in context only as long as needed for the task.
+Searching before reading and reading after writing are what turn a guess into a
+verified change. When an operation fails, its message names the constraint that
+was violated — an unknown path, a range past the end of the file, a `match`
+that is not there — and the call that fixes it is usually the one you just made
+with a different value.

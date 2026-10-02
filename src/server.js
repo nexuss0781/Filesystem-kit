@@ -10,15 +10,9 @@ const port = Number(process.env.PORT || 3000);
 app.disable('x-powered-by');
 app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '10mb' }));
 
-function safePath(value, fallback = '.') {
+function requirePath(value, fallback = '.') {
   if (typeof value !== 'string' || value.length === 0) throw new TypeError('path must be a non-empty string');
-  const resolved = path.resolve(root, value || fallback);
-  if (resolved !== root && !resolved.startsWith(`${root}${path.sep}`)) {
-    const error = new Error('path must stay inside FILESYSTEM_ROOT');
-    error.status = 403;
-    throw error;
-  }
-  return resolved;
+  return value || fallback;
 }
 
 function rangeFrom(query) {
@@ -43,8 +37,7 @@ app.get('/health', (_request, response) => response.json({ status: 'ok', root: p
 
 app.get('/api/read', async (request, response, next) => {
   try {
-    const filePath = safePath(request.query.path);
-    const content = await read(filePath, { head: request.query.head == null ? undefined : Number(request.query.head), tail: request.query.tail == null ? undefined : Number(request.query.tail), range: rangeFrom(request.query) });
+    const content = await read(requirePath(request.query.path), { cwd: root, head: request.query.head == null ? undefined : Number(request.query.head), tail: request.query.tail == null ? undefined : Number(request.query.tail), range: rangeFrom(request.query) });
     response.type('text/plain').send(content);
   } catch (error) { next(error); }
 });
@@ -52,7 +45,7 @@ app.get('/api/read', async (request, response, next) => {
 app.put('/api/write', async (request, response, next) => {
   try {
     const body = request.body || {};
-    const result = await write(safePath(body.path), body.content ?? '', { append: bool(body.append), range: body.range, createDirs: body.createDirs !== false });
+    const result = await write(requirePath(body.path), body.content ?? '', { cwd: root, append: bool(body.append), range: body.range, createDirs: body.createDirs !== false });
     response.status(201).json(publicResult(result));
   } catch (error) { next(error); }
 });
@@ -60,37 +53,35 @@ app.put('/api/write', async (request, response, next) => {
 app.patch('/api/modify', async (request, response, next) => {
   try {
     const body = request.body || {};
-    const result = await modify(safePath(body.path), { match: body.match, replacement: body.replacement, occurrence: body.occurrence, rewrite: body.rewrite, range: body.range });
+    const result = await modify(requirePath(body.path), { cwd: root, match: body.match, replacement: body.replacement, occurrence: body.occurrence, rewrite: body.rewrite, range: body.range });
     response.json(publicResult(result));
   } catch (error) { next(error); }
 });
 
 app.delete('/api/delete', async (request, response, next) => {
   try {
-    const result = await remove(safePath(request.query.path), { recursive: bool(request.query.recursive), force: bool(request.query.force) });
+    const result = await remove(requirePath(request.query.path), { cwd: root, recursive: bool(request.query.recursive), force: bool(request.query.force) });
     response.json(publicResult(result));
   } catch (error) { next(error); }
 });
 
 app.get('/api/list', async (request, response, next) => {
   try {
-    const result = await list(safePath(request.query.path || '.'), { all: bool(request.query.all) });
+    const result = await list(requirePath(request.query.path, '.'), { cwd: root, all: bool(request.query.all) });
     response.json(publicResult(result));
   } catch (error) { next(error); }
 });
 
 app.get('/api/glob', async (request, response, next) => {
   try {
-    const cwd = safePath(request.query.cwd || '.');
-    const result = await glob(String(request.query.pattern || ''), { cwd, all: bool(request.query.all) });
+    const result = await glob(String(request.query.pattern || ''), { cwd: root, path: requirePath(request.query.path, '.'), all: bool(request.query.all) });
     response.json(result.map(publicPath));
   } catch (error) { next(error); }
 });
 
 app.get('/api/grep', async (request, response, next) => {
   try {
-    const searchPath = safePath(request.query.path || '.');
-    const result = await grep(String(request.query.pattern || ''), { path: searchPath, ignoreCase: bool(request.query.ignoreCase), all: bool(request.query.all) });
+    const result = await grep(String(request.query.pattern || ''), { cwd: root, path: requirePath(request.query.path, '.'), ignoreCase: bool(request.query.ignoreCase), all: bool(request.query.all) });
     response.json(publicResult(result));
   } catch (error) { next(error); }
 });
