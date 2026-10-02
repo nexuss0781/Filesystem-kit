@@ -3,7 +3,8 @@
 A filesystem API, CLI and HTTP service for coding agents. One configured root, a
 small set of exact operations, and nothing that can reach outside it.
 
-- No runtime dependencies for the library. Node's built-ins only.
+- No runtime dependencies. Node's built-ins only, server included.
+- Works against this disk or a remote FileSystem Kit machine, chosen by one option.
 - The root is enforced in code, so a path that would leave it fails before any
   disk access instead of relying on the caller to behave.
 - Precise addressing: 1-based inclusive line ranges, single-occurrence edits,
@@ -124,6 +125,60 @@ newline included.
 
 `*` stays within one segment and `?` matches one character.
 
+## Two machines, one API
+
+`createFilesystem()` returns a backend with the same seven operations, and it is
+either this disk or a remote machine. Which one is a configuration decision, not
+something calling code has to know about.
+
+```js
+import { createFilesystem } from 'filesystem-kit';
+
+const here = createFilesystem({ cwd: '/home/you/project' });
+const cloud = createFilesystem({ baseUrl: 'https://filesystem-kit.wasmer.app', token: process.env.FSK_TOKEN });
+
+await here.write('notes/today.md', 'local');
+await cloud.write('notes/today.md', 'on the volume');
+```
+
+Both expose `read`, `write`, `modify`, `remove`, `list`, `glob`, `grep`, and
+`describe()`, plus `kind` and `root`. `describe()` asks a remote machine what its
+root is, which is worth knowing before writing anything to it.
+
+`path` in a result is always the path on that backend's own machine, starting
+with a slash, so `/notes/today.md` reads the same way on both.
+
+### Errors mean the same thing on both
+
+The codes are the contract, so a `catch` written once works on either machine:
+
+| Code | Meaning |
+| --- | --- |
+| `EOUTSIDE` | the path would leave the root; an `OutsideRootError` |
+| `ENOENT` | no such file or directory |
+| `EEXIST` | something is already in the way |
+| `EINVAL` | a bad argument |
+| `E_UNAUTHORIZED` | the server wants a bearer token |
+| `E_UNREACHABLE` | the machine could not be reached at all |
+
+### What cannot cross the wire
+
+Three things are refused by the remote backend rather than quietly mistranslated,
+because JSON has no way to carry them faithfully:
+
+- A `RegExp` for `grep`. Pass the pattern as a string.
+- A `Buffer` for `write`. The protocol is UTF-8 text.
+- An `encoding` other than UTF-8.
+
+### Latency is the real cost
+
+Measured against the deployment above: the first request after an idle period
+takes about **1.6s** while the instance scales up, and each subsequent request on
+a warm connection about **200ms**. So a remote backend is right for state an agent
+should treat as one machine's disk, and wrong for a hot loop over hundreds of
+small files. `fetch` pools connections, so the warm figure is what a normal
+session sees.
+
 ## CLI
 
 ```bash
@@ -181,6 +236,10 @@ mounts a Wasmer volume at `/home/ubuntu` and points the root there with
 redeploys, and scale-out. It is that container's home directory, not the host's.
 A deployment without the volume has an ephemeral filesystem and cannot keep state
 between requests.
+
+Set `FSK_TOKEN` on the server to require `Authorization: Bearer <token>`; without
+it the service is open, which is convenient on localhost and wrong for a machine
+holding real files. The client picks the token up from its own `FSK_TOKEN`.
 
 Deploy from a checkout with `wasmer deploy --build-remote`, then check `/health`
 and confirm the reported `root` is `/home/ubuntu` before trusting any writes. Two

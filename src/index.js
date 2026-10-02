@@ -1,20 +1,10 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { OutsideRootError } from './errors.js';
+import { createRemoteFilesystem } from './remote.js';
 
 const DEFAULT_ENCODING = 'utf8';
 const TAIL_CHUNK = 64 * 1024;
-
-/** Thrown when a path resolves outside the root. Carries a 403 status for the HTTP layer. */
-class OutsideRootError extends Error {
-  constructor(requested, root) {
-    super(`path is outside the root: ${requested} (root: ${root})`);
-    this.name = 'OutsideRootError';
-    this.code = 'EOUTSIDE';
-    this.status = 403;
-    this.requested = requested;
-    this.root = root;
-  }
-}
 
 function rootOf(options = {}) {
   return path.resolve(options.cwd ?? process.cwd());
@@ -244,5 +234,44 @@ async function grep(pattern, options = {}) {
   return results;
 }
 
-export { read, write, modify, remove, list, glob, grep, OutsideRootError };
-export default { read, write, modify, remove, list, glob, grep };
+/**
+ * Binds the local functions to a root, so a backend is an object with the same
+ * seven methods as the remote one.
+ *
+ * Each method merges the call's own options over the bound ones. Spreading the
+ * bound options in as a trailing argument would look tidier and be wrong:
+ * `write(path, content, { append: true })` would then be handed the root as a
+ * fourth parameter, which `write` ignores, and every such call would quietly
+ * land in the process directory instead of the bound root.
+ */
+function createLocalFilesystem(options = {}) {
+  const bound = { ...options, cwd: rootOf(options) };
+  return {
+    kind: 'local',
+    root: bound.cwd,
+    describe: async () => ({ status: 'ok', root: bound.cwd, service: 'filesystem-kit' }),
+    read: (filePath, callOptions = {}) => read(filePath, { ...bound, ...callOptions }),
+    write: (filePath, content, callOptions = {}) => write(filePath, content, { ...bound, ...callOptions }),
+    modify: (filePath, callOptions = {}) => modify(filePath, { ...bound, ...callOptions }),
+    remove: (filePath, callOptions = {}) => remove(filePath, { ...bound, ...callOptions }),
+    list: (directory = '.', callOptions = {}) => list(directory, { ...bound, ...callOptions }),
+    glob: (pattern, callOptions = {}) => glob(pattern, { ...bound, ...callOptions }),
+    grep: (pattern, callOptions = {}) => grep(pattern, { ...bound, ...callOptions }),
+  };
+}
+
+/**
+ * One entry point for either machine.
+ *
+ * Give it `baseUrl` to talk to a FileSystem Kit server, or nothing to use this
+ * disk. The returned object is the same shape either way, so which machine is
+ * in use is a configuration decision rather than something calling code has to
+ * know about.
+ */
+function createFilesystem(options = {}) {
+  if (options.baseUrl != null || options.url != null) return createRemoteFilesystem(options);
+  return createLocalFilesystem(options);
+}
+
+export { read, write, modify, remove, list, glob, grep, OutsideRootError, createLocalFilesystem, createRemoteFilesystem, createFilesystem };
+export default { read, write, modify, remove, list, glob, grep, createLocalFilesystem, createRemoteFilesystem, createFilesystem };
