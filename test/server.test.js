@@ -49,6 +49,33 @@ test('writes, reads, modifies, lists, greps, globs, and deletes over HTTP', asyn
   assert.equal(response.status, 200);
 });
 
+test('runs a command over HTTP and reports its output and exit code', async () => {
+  const response = await request('/api/exec', {
+    method: 'POST',
+    body: JSON.stringify({ command: 'echo over-http | tr a-z A-Z; exit 7' }),
+  });
+  assert.equal(response.status, 200);
+  const result = await response.json();
+  assert.equal(result.stdout, 'OVER-HTTP\n');
+  assert.equal(result.code, 7);
+  assert.equal(result.timedOut, false);
+});
+
+test('a command run over HTTP writes where the file API reads', async () => {
+  const command = await request('/api/exec', { method: 'POST', body: JSON.stringify({ command: 'echo shared > http/from-shell.txt' }) });
+  assert.equal(command.status, 200);
+  const read = await request('/api/read?path=http/from-shell.txt');
+  assert.equal(await read.text(), 'shared\n');
+});
+
+test('refuses a command whose directory leaves the root, and rejects an empty one', async () => {
+  const outside = await request('/api/exec', { method: 'POST', body: JSON.stringify({ command: 'pwd', directory: '../..' }) });
+  assert.equal(outside.status, 403);
+  assert.match((await outside.json()).message, /outside the root/);
+  const empty = await request('/api/exec', { method: 'POST', body: JSON.stringify({ command: '   ' }) });
+  assert.equal(empty.status, 400);
+});
+
 test('rejects traversal outside the configured root', async () => {
   const response = await request('/api/read?path=../../etc/passwd');
   assert.equal(response.status, 403);

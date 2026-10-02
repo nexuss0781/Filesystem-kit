@@ -152,6 +152,21 @@ function createRemoteFilesystem(options = {}) {
       return entries.map((entry) => ({ ...entry, path: reported(entry.path) }));
     },
 
+    /** Runs a command on the remote machine and reports its exit code and output. */
+    async exec(command, execOptions = {}) {
+      requireText(command, 'command');
+      return json(await send('POST', '/api/exec', {
+        body: {
+          command,
+          directory: execOptions.directory,
+          timeoutMs: execOptions.timeoutMs,
+          maxOutputBytes: execOptions.maxOutputBytes,
+          env: execOptions.env,
+          createDir: execOptions.createDir,
+        },
+      }), command);
+    },
+
     async glob(pattern, globOptions = {}) {
       const matches = await json(await send('GET', '/api/glob', {
         query: { pattern: String(pattern), path: globOptions.path ?? '.', all: globOptions.all === true },

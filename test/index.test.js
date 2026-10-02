@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readdir, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { read, write, modify, remove, list, glob, grep } from '../src/index.js';
+import { read, write, modify, remove, list, glob, grep, exec } from '../src/index.js';
 
 let root;
 test.beforeEach(async () => { root = await mkdtemp(path.join(os.tmpdir(), 'filesystem-kit-')); });
@@ -138,4 +138,111 @@ test('rejects ambiguous or invalid read options', async () => {
   await assert.rejects(() => read('file.txt', { cwd: root, range: { start: 3, end: 1 } }), /valid/);
   await assert.rejects(() => read('file.txt', { cwd: root, head: -1 }), /non-negative/);
   await assert.rejects(() => read('', { cwd: root }), /non-empty/);
+});
+
+test('every source file is published, so a deploy cannot be missing one', async () => {
+  const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+  const sources = (await readdir(new URL('../src', import.meta.url))).filter((name) => name.endsWith('.js'));
+  const published = pkg.files.filter((entry) => entry.startsWith('src/'));
+  const missing = sources.filter((name) => !published.includes(`src/${name}`));
+  assert.deepEqual(missing, [], `not listed in package.json files: ${missing.join(', ')}`);
+});
+
+test('runs a command with pipes, chains and substitution, and reports the exit code', async () => {
+  const result = await exec('echo one | tr a-z A-Z && echo "code=$?" && echo $(echo nested)', { cwd: root });
+  assert.equal(result.code, 0);
+  assert.equal(result.stdout, 'ONE\ncode=0\nnested\n');
+  assert.equal(result.stderr, '');
+  assert.equal(result.timedOut, false);
+});
+
+test('reports a failing command without throwing', async () => {
+  const result = await exec('echo before; exit 3', { cwd: root });
+  assert.equal(result.code, 3);
+  assert.equal(result.stdout, 'before\n');
+});
+
+test('captures stderr separately from stdout', async () => {
+  const result = await exec('echo out; echo err 1>&2', { cwd: root });
+  assert.equal(result.stdout, 'out\n');
+  assert.equal(result.stderr, 'err\n');
+});
+
+test('starts in the root, so a relative write lands on the machine', async () => {
+  const result = await exec('echo persisted > written.txt', { cwd: root });
+  assert.equal(result.code, 0);
+  assert.equal(await readFile(path.join(root, 'written.txt'), 'utf8'), 'persisted\n');
+});
+
+test('can run in a directory inside the root', async () => {
+  await mkdir(path.join(root, 'inner'), { recursive: true });
+  const result = await exec('pwd', { cwd: root, directory: 'inner' });
+  assert.equal(result.cwd, path.join(root, 'inner'));
+  assert.ok(result.stdout.includes('inner'));
+});
+
+test('refuses a directory outside the root', async () => {
+  await assert.rejects(() => exec('pwd', { cwd: root, directory: '../elsewhere' }), (error) => {
+    assert.equal(error.name, 'OutsideRootError');
+    assert.equal(error.code, 'EOUTSIDE');
+    return true;
+  });
+});
+
+test('kills a command that runs past its timeout instead of waiting forever', async () => {
+  const result = await exec('while true; do echo noise; done', { cwd: root, timeoutMs: 400 });
+  assert.equal(result.timedOut, true);
+  assert.equal(result.code, null);
+});
+
+test('stops keeping output past the cap but still reports the command finished', async () => {
+  const result = await exec('for i in $(seq 1 500); do echo 0123456789; done', { cwd: root, maxOutputBytes: 256 });
+  assert.equal(result.truncated, true);
+  assert.ok(result.stdout.length <= 256, `expected at most 256 bytes, got ${result.stdout.length}`);
+  assert.equal(result.code, 0);
+});
+
+test('never hands the shell the environment of the process running it', async () => {
+  process.env.FSK_TOKEN_TEST_SECRET = 'do-not-leak';
+  try {
+    const result = await exec('echo "[$FSK_TOKEN_TEST_SECRET][$FSK_TOKEN]"', { cwd: root });
+    assert.equal(result.stdout, '[][]\n');
+  } finally {
+    delete process.env.FSK_TOKEN_TEST_SECRET;
+  }
+});
+
+test('passes through only the environment the caller asked for', async () => {
+  const result = await exec('echo "[$GREETING]"', { cwd: root, env: { GREETING: 'hello' } });
+  assert.equal(result.stdout, '[hello]\n');
+});
+
+test('creates the working directory when it is missing, and can be told not to', async () => {
+  const result = await exec('echo made-in-a-new-folder > f.txt && ls', { cwd: root, directory: 'fresh' });
+  assert.equal(result.code, 0);
+  assert.equal(result.stdout.trim(), 'f.txt');
+  assert.equal(await readFile(path.join(root, 'fresh', 'f.txt'), 'utf8'), 'made-in-a-new-folder\n');
+  await assert.rejects(() => exec('pwd', { cwd: root, directory: 'never-made', createDir: false }), (error) => {
+    assert.equal(error.code, 'ENOENT');
+    return true;
+  });
+});
+
+test('says plainly when the directory does not exist, instead of blaming bash', async () => {
+  await assert.rejects(() => exec('pwd', { cwd: root, directory: 'not-here', createDir: false }), (error) => {
+    assert.equal(error.code, 'ENOENT');
+    assert.match(error.message, /no such directory/);
+    assert.doesNotMatch(error.message, /bash/);
+    return true;
+  });
+  await write('a-file.txt', 'x', { cwd: root });
+  await assert.rejects(() => exec('pwd', { cwd: root, directory: 'a-file.txt' }), (error) => {
+    assert.equal(error.code, 'ENOTDIR');
+    return true;
+  });
+});
+
+test('rejects an empty command and a missing root', async () => {
+  await assert.rejects(() => exec('   ', { cwd: root }), TypeError);
+  await assert.rejects(() => exec('pwd', {}), /needs a root/);
 });

@@ -1,6 +1,6 @@
 ---
 name: filesystem-kit
-description: Read, write, edit, find and delete files and folders through the configured FileSystem Kit. Use whenever a task requires looking at, changing, or locating anything on disk — reading a file, patching one line, creating a file, listing a folder, globbing paths, searching contents, or removing something.
+description: Read, write, edit, find, delete and run commands on the files and folders of the configured FileSystem Kit. Use whenever a task requires looking at, changing, locating or building something on disk — reading a file, patching one line, creating a file, listing a folder, globbing paths, searching contents, removing something, or running a build or test.
 ---
 
 # FileSystem Kit
@@ -19,8 +19,10 @@ concerned.
 - `..` resolves the way it always does on a filesystem, and the result is still
   required to be inside the root. A path that would leave the root is rejected
   with `outside the root` before any disk access happens.
-- There is no host machine to name, no `/etc`, no `/tmp`, no `~`. If something
-  is not under `/`, it is not part of this machine.
+- For file operations there is no host machine to name, no `/etc`, no `/tmp`,
+  no `~`. If something is not under `/`, it is not part of this machine.
+- `exec` is the one exception, and deliberately so: a command is a real shell
+  and can reach outside the root. See [exec](#exec).
 
 Because the root is enforced rather than advisory, you never have to reason
 about whether a path is safe to touch. Every path that reaches a function is
@@ -44,6 +46,7 @@ the same extension.
 | find files by name | `glob` |
 | find files by what is inside them | `grep` |
 | remove a file or folder | `remove` |
+| run a build, a test, or any program | `exec` |
 
 Reach for `modify` rather than `write` when you are changing something that
 already exists. `write` replaces a file from the first byte; `modify` changes
@@ -219,6 +222,35 @@ is never half-deleted. Before a recursive delete, `list` the folder first: it is
 one call, and it is the difference between removing a build cache and removing
 the source.
 
+## exec
+
+`exec` runs one shell command on this machine and reports how it went.
+
+```json
+{ "command": "npm test", "directory": "app", "timeoutMs": 60000 }
+```
+
+It answers with `code`, `stdout`, `stderr`, `timedOut`, `truncated` and
+`durationMs`.
+
+- **A non-zero `code` is an answer, not a failure.** The call succeeds and you
+  read the code. A test suite that fails is a result to report, not an error to
+  retry.
+- **It starts inside the root**, so a relative path means the same thing it does
+  in `read` and `write`, and what the command writes is on this machine's disk.
+- **It is not interactive.** Nothing is written to stdin, so there is no prompt
+  to answer. Do not run `vim`, `top`, or anything else that waits for a person.
+- **`directory` is created if it is missing.** Pass `createDir: false` if you
+  would rather it be an error.
+- **It runs the machine's programs.** `node` and `npm` are present on the
+  deployed machine; `grep`, `sed`, `awk`, `git` and `python3` are not. Use
+  `glob` and `grep` for searching — they are the same on every machine.
+
+Prefer a file operation when one will do. `modify` is safer than a shell
+rewriting a file, `grep` is available everywhere, and each one is easier to undo
+when it goes wrong. Reach for `exec` when the work is genuinely running a
+program.
+
 ## Working method
 
 1. `list` or `glob` when you do not yet know the exact path.
@@ -242,6 +274,9 @@ Treat the root as one machine's disk. Paths start from it, `/` means the root of
 that machine, and nothing reaches outside. A path outside the root fails with
 `EOUTSIDE` rather than being rewritten, so if you see it, the path is wrong, not
 the permission.
+
+`exec` works the same way on either machine, and is the one operation that is not
+confined by it.
 
 The one difference worth knowing is speed. A remote machine answers in roughly
 200ms and its first call after an idle stretch takes longer while it wakes up, so
