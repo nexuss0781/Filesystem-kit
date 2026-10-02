@@ -2,7 +2,7 @@ import http from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { read, write, modify, remove, list, glob, grep } from './index.js';
+import { read, write, modify, remove, list, glob, grep, exec } from './index.js';
 
 /**
  * Wasmer Edge injects its own FILESYSTEM_ROOT pointing at a scratch directory
@@ -118,12 +118,26 @@ function readBody(request) {
   });
 }
 
+/**
+ * Only the fields the caller is allowed to set. `env` is filtered again inside
+ * exec, which drops everything not named here before the shell starts.
+ */
+function pickExec(body) {
+  return {
+    directory: typeof body.directory === 'string' ? body.directory : undefined,
+    timeoutMs: typeof body.timeoutMs === 'number' ? body.timeoutMs : undefined,
+    maxOutputBytes: typeof body.maxOutputBytes === 'number' ? body.maxOutputBytes : undefined,
+    env: body.env && typeof body.env === 'object' && !Array.isArray(body.env) ? body.env : undefined,
+    createDir: typeof body.createDir === 'boolean' ? body.createDir : undefined,
+  };
+}
+
 const routes = {
   'GET /health': async () => ({ status: 200, json: { status: 'ok', root, service: 'filesystem-kit' } }),
 
   'GET /': async () => ({
     status: 200,
-    json: { service: 'filesystem-kit', root, routes: ['/health', '/api/read', '/api/write', '/api/modify', '/api/delete', '/api/list', '/api/glob', '/api/grep'] },
+    json: { service: 'filesystem-kit', root, routes: ['/health', '/api/read', '/api/write', '/api/modify', '/api/delete', '/api/list', '/api/glob', '/api/grep', '/api/exec'] },
   }),
 
   'GET /api/read': async (query) => {
@@ -156,10 +170,35 @@ const routes = {
   'GET /api/glob': async (query) => ({ status: 200, json: await glob(String(query.pattern || ''), { cwd: root, path: optionalPath(query.path), all: bool(query.all) }) }),
 
   'GET /api/grep': async (query) => ({ status: 200, json: await grep(String(query.pattern || ''), { cwd: root, path: optionalPath(query.path), ignoreCase: bool(query.ignoreCase), all: bool(query.all) }) }),
+
+  /**
+   * Runs one command on this machine and returns everything about how it went:
+   * stdout, stderr, the exit code, whether it was cut short by a timeout, and
+   * whether its output was too large to keep.
+   *
+   * A non-zero exit code is a normal answer rather than an error, so it comes
+   * back as 200. Only a request that cannot be run at all -- no command, or a
+   * directory outside the root -- is a 4xx.
+   */
+  'POST /api/exec': async (_query, body) => {
+    const command = body.command;
+    if (typeof command !== 'string' || command.trim() === '') {
+      const error = new Error('command must be a non-empty string');
+      error.status = 400;
+      throw error;
+    }
+    return { status: 200, json: await exec(command, { cwd: root, ...pickExec(body) }) };
+  },
 };
 
-export function createServer() {
-  return http.createServer(async (request, response) => {
+/**
+ * Methods whose requests carry a JSON body. `/api/exec` is a POST, and a POST
+ * whose body is never read arrives here as an empty object, which looks exactly
+ * like a request that forgot to send a command.
+ */
+const BODY_METHODS = new Set(['PUT', 'PATCH', 'POST']);
+
+export function createServer() {  return http.createServer(async (request, response) => {
     const url = new URL(request.url, 'http://localhost');
     if (!authorized(request)) {
       return sendJson(response, 401, { error: 'unauthorized', code: 'E_UNAUTHORIZED', message: 'a bearer token is required' });
@@ -168,7 +207,7 @@ export function createServer() {
     if (!route) return sendJson(response, 404, { error: 'not_found', code: 'ENOENT', message: 'route not found' });
     try {
       const query = Object.fromEntries(url.searchParams);
-      const body = request.method === 'PUT' || request.method === 'PATCH' ? await readBody(request) : {};
+      const body = BODY_METHODS.has(request.method) ? await readBody(request) : {};
       const result = await route(query, body);
       if (result.text !== undefined) return sendText(response, result.status, result.text);
       return sendJson(response, result.status, result.json);

@@ -1,6 +1,6 @@
 {
   "name": "filesystem-kit",
-  "version": "3.0.1",
+  "version": "3.1.0",
   "description": "A focused filesystem API and CLI for coding agents and research workflows.",
   "type": "module",
   "main": "src/index.js",
@@ -43,6 +43,7 @@
     "src/server.js",
     "src/remote.js",
     "src/errors.js",
+    "src/exec.js",
     "SKILL/",
     "README.md",
     "LICENSE"

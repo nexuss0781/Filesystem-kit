@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { createFilesystem } from '../src/index.js';
@@ -36,7 +36,14 @@ for (const backend of backends) {
   async function setup(t) {
     const name = `case-${Math.random().toString(36).slice(2)}`;
     const fsx = make(name);
-    return { fsx, at: (file = '') => `${prefix(name)}${file}` };
+    // The local backend is already rooted in the case folder, while the remote
+    // one shares the server's root with every other case and has to be told
+    // where to stand. Both therefore end up in the same directory on disk.
+    return {
+      fsx,
+      at: (file = '') => `${prefix(name)}${file}`,
+      execOptions: { directory: label === 'local' ? undefined : name },
+    };
   }
 
   test(`${label}: writes and reads back the same bytes`, async (t) => {
@@ -165,6 +172,63 @@ for (const backend of backends) {
     assert.ok(described.root.length > 0);
   });
 }
+
+for (const backend of backends) {
+  const { label, make } = backend;
+
+  test(`${label}: runs a command and reports its output, streams and exit code`, async (t) => {
+    const name = `case-${Math.random().toString(36).slice(2)}`;
+    const fsx = make(name);
+    const execOptions = { directory: label === 'local' ? undefined : name };
+    const result = await fsx.exec('echo one | tr a-z A-Z && echo $(echo nested); exit 2', execOptions);
+    assert.equal(result.stdout, 'ONE\nnested\n');
+    assert.equal(result.stderr, '');
+    assert.equal(result.code, 2);
+    assert.equal(result.timedOut, false);
+  });
+
+  test(`${label}: a command writes into the same place the file tools read`, async (t) => {
+    const name = `case-${Math.random().toString(36).slice(2)}`;
+    const fsx = make(name);
+    const at = (file) => `${backend.prefix(name)}${file}`;
+    const execOptions = { directory: label === 'local' ? undefined : name };
+    await fsx.exec('echo from-the-shell > shell.txt', execOptions);
+    assert.equal(await fsx.read(at('shell.txt')), 'from-the-shell\n');
+    await fsx.exec('printf "appended\n" >> shell.txt', execOptions);
+    assert.equal(await fsx.read(at('shell.txt')), 'from-the-shell\nappended\n');
+  });
+
+  test(`${label}: a command is bound by the same timeout and output cap`, async (t) => {
+    const name = `case-${Math.random().toString(36).slice(2)}`;
+    const fsx = make(name);
+    const execOptions = { directory: label === 'local' ? undefined : name };
+    const slow = await fsx.exec('while true; do echo noise; done', { ...execOptions, timeoutMs: 500 });
+    assert.equal(slow.timedOut, true);
+    const loud = await fsx.exec('for i in $(seq 1 400); do echo 0123456789; done', { ...execOptions, maxOutputBytes: 128 });
+    assert.equal(loud.truncated, true);
+    assert.ok(loud.stdout.length <= 128, `expected at most 128 bytes, got ${loud.stdout.length}`);
+  });
+
+  test(`${label}: a command cannot stand outside the root`, async (t) => {
+    const name = `case-${Math.random().toString(36).slice(2)}`;
+    const fsx = make(name);
+    await assert.rejects(() => fsx.exec('pwd', { directory: '../..' }), (error) => {
+      assert.equal(error.code, 'EOUTSIDE');
+      return true;
+    });
+  });
+}
+
+test('a command produces the same result on either machine', async () => {
+  await mkdir(path.join(root, 'same'), { recursive: true });
+  const local = createFilesystem({ cwd: path.join(root, 'same') });
+  const remote = createFilesystem({ baseUrl: origin });
+  const command = 'echo machine | tr a-z A-Z && node -e "console.log(6*7)"';
+  const here = await local.exec(command);
+  const there = await remote.exec(command, { directory: 'same' });
+  assert.equal(here.stdout, there.stdout);
+  assert.equal(here.code, there.code);
+});
 
 test('a RegExp cannot be sent to a remote machine, and says so', async () => {
   const remote = createFilesystem({ baseUrl: origin });

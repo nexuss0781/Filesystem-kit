@@ -49,7 +49,7 @@ is thrown, carrying `code: 'EOUTSIDE'` and `status: 403` for the HTTP layer.
 ## API
 
 ```js
-import { read, write, modify, remove, list, glob, grep } from 'filesystem-kit';
+import { read, write, modify, remove, list, glob, grep, exec } from 'filesystem-kit';
 ```
 
 | Function | Returns |
@@ -61,6 +61,7 @@ import { read, write, modify, remove, list, glob, grep } from 'filesystem-kit';
 | `list(directory, options)` | `[{ name, path, type }]`, sorted by name |
 | `glob(pattern, options)` | absolute path strings, sorted |
 | `grep(pattern, options)` | `[{ path, line, text }]`, one per matching line |
+| `exec(command, options)` | `{ code, stdout, stderr, timedOut, truncated, durationMs }` |
 
 `type` is `file`, `directory` or `other`. Only `read` returns a bare string;
 everything else returns objects carrying the absolute path it acted on.
@@ -83,6 +84,7 @@ Shared by every function:
 | `list` | — |
 | `glob` | `path` — the subtree to search |
 | `grep` | `path` — a file or subtree, `ignoreCase`, or a `RegExp` pattern |
+| `exec` | `directory`, `timeoutMs`, `maxOutputBytes`, `env`, `createDir` |
 
 ### Line addressing
 
@@ -124,6 +126,67 @@ newline included.
 | `src/<double star>` | every entry beneath `src` |
 
 `*` stays within one segment and `?` matches one character.
+
+## Running commands
+
+`exec` runs a shell command on the machine and tells you exactly how it went.
+
+```js
+const result = await fsx.exec('npm install --silent && ls | wc');
+result.code;        // 0
+result.stdout;      // '      12      84      412\n'
+result.timedOut;    // false
+```
+
+It behaves the same locally and on a deployed machine, so the same code can
+build on this disk or on a remote volume. The command starts **inside the root**,
+which is what makes it useful here: a relative path in a command means what it
+means in `read` and `write`, and anything the command writes lands on the
+persisted volume rather than somewhere that disappears on the next deploy.
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `directory` | the root | where to run, relative to the root |
+| `timeoutMs` | `30000` | after this the process is killed and `timedOut` is true |
+| `maxOutputBytes` | `262144` | per stream; past this output stops being kept and `truncated` is true |
+| `env` | `{}` | extra variables to set |
+| `createDir` | `true` | create `directory` if it does not exist, as `write` does |
+
+**A non-zero exit code is a normal answer, not an error.** `exec` returns a
+result with `code: 7` rather than throwing, so a test that is meant to fail can
+be run as a test.
+
+Three things it deliberately does not do:
+
+- **It is not an interactive shell.** stdin is closed immediately, so there is
+  nothing to type at and no session to keep open. Use a command; get its output.
+- **It is not confined the way the file operations are.** Those refuse any path
+  outside the root because they resolve paths themselves. A command is a real
+  shell and can reach the rest of the machine. If you need the guarantee, use
+  the file API; if you need to run programs, you already know what you are
+  trusting.
+- **It never sees the server's own environment.** The shell is given `PATH`,
+  `HOME`, `TMPDIR` and `LANG`, plus whatever you pass in `env`. Nothing else,
+  which means a command that runs `env` cannot read `FSK_TOKEN` — the token
+  guarding the API — however it is spelled.
+
+The working directory has to exist before a command can start in it, and `mkdir`
+is not available to create one from inside the command that would need it, so
+`directory` is created when it is missing. Pass `createDir: false` to turn that
+into an error instead.
+
+### What the shell can reach
+
+On a normal machine that is everything. On Wasmer Edge the app runs in a
+WebAssembly sandbox where `uname` reports `wasi`, and the userland is small:
+
+| Available | Missing |
+| --- | --- |
+| `bash`, `ls`, `cat`, `wc`, `head`, `tail`, `sort`, `uniq`, `tr`, `test`, `printf`, `expr`, `node`, `npm` | `grep`, `sed`, `awk`, `find`, `diff`, `jq`, `tar`, `git`, `curl`, `python3`, `npx` |
+
+Pipes, `>` and `>>` redirection, `&&` and `||`, heredocs, `$(...)` and exit codes
+all work. For searching and editing, use `glob` and `grep`, which are the same on
+both machines and do not depend on the sandbox at all.
 
 ## Two machines, one API
 
@@ -217,17 +280,24 @@ FSK_ROOT=/workspace PORT=3000 npm start
 | `GET` | `/api/list` | `path`, `all` |
 | `GET` | `/api/glob` | `pattern`, `path`, `all` |
 | `GET` | `/api/grep` | `pattern`, `path`, `ignoreCase`, `all` |
+| `POST` | `/api/exec` | `command`, `directory`, `timeoutMs`, `maxOutputBytes`, `env`, `createDir` |
 
 Paths are resolved inside the root and reported back relative to it, so a client
 never sees a host path. Errors are JSON: `403` for a path outside the root, `404`
 for a missing file or route, `400` for an invalid argument.
 
+`/api/exec` answers `200` even when the command exits non-zero, because the exit
+code is part of the result rather than a failure of the request. Only a request
+that cannot be run at all — no command, or a directory outside the root — is a
+`4xx`. Anyone who can reach this endpoint can run commands on the machine, so it
+belongs behind `FSK_TOKEN`; see [Token auth](#token-auth).
+
 The root is `FSK_ROOT`, then `FILESYSTEM_ROOT`, then the working directory.
 `FSK_ROOT` comes first because Wasmer Edge overrides `FILESYSTEM_ROOT` with its
 own scratch directory, which is not the mounted volume; trusting
-`FILESYSTEM_ROOT` there silently writes to ephemeral storage. Because `exports`
-maps only the library entry point, run the service from a checkout of the
-repository rather than from an installed copy.
+`FILESYSTEM_ROOT` there silently writes to ephemeral storage. The library is
+published as `filesystem-kit` and the service as `filesystem-kit/server`, so
+either can be installed; this section assumes a checkout of the repository.
 
 ### Wasmer persistence
 
@@ -238,9 +308,20 @@ redeploys, and scale-out. It is that container's home directory, not the host's.
 A deployment without the volume has an ephemeral filesystem and cannot keep state
 between requests.
 
+### Token auth
+
 Set `FSK_TOKEN` on the server to require `Authorization: Bearer <token>`; without
 it the service is open, which is convenient on localhost and wrong for a machine
 holding real files. The client picks the token up from its own `FSK_TOKEN`.
+
+With `/api/exec` in place this matters more than it did. Before it, an open
+service leaked files; now it hands out a shell on the machine, with `node` and
+`npm` on it. Anyone who can reach the endpoint can run programs there.
+
+The shell never receives the token, so running `env` will not disclose it, but
+that is a smaller comfort than it sounds: a command has the same access to the
+volume that the API does, and a caller who is allowed to run commands is
+effectively allowed to read the files.
 
 Deploy from a checkout with `wasmer deploy --build-remote`, then check `/health`
 and confirm the reported `root` is `/home/ubuntu` before trusting any writes. Two

@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { OutsideRootError } from './errors.js';
+import { exec } from './exec.js';
 import { createRemoteFilesystem } from './remote.js';
 
 const DEFAULT_ENCODING = 'utf8';
@@ -252,7 +253,7 @@ async function grep(pattern, options = {}) {
 
 /**
  * Binds the local functions to a root, so a backend is an object with the same
- * seven methods as the remote one.
+ * methods as the remote one.
  *
  * Each method merges the call's own options over the bound ones. Spreading the
  * bound options in as a trailing argument would look tidier and be wrong:
@@ -273,6 +274,7 @@ function createLocalFilesystem(options = {}) {
     list: (directory = '.', callOptions = {}) => list(directory, { ...bound, ...callOptions }),
     glob: (pattern, callOptions = {}) => glob(pattern, { ...bound, ...callOptions }),
     grep: (pattern, callOptions = {}) => grep(pattern, { ...bound, ...callOptions }),
+    exec: (command, callOptions = {}) => exec(command, { ...bound, ...callOptions }),
   };
 }
 
@@ -289,5 +291,5 @@ function createFilesystem(options = {}) {
   return createLocalFilesystem(options);
 }
 
-export { read, write, modify, remove, list, glob, grep, OutsideRootError, createLocalFilesystem, createRemoteFilesystem, createFilesystem };
-export default { read, write, modify, remove, list, glob, grep, createLocalFilesystem, createRemoteFilesystem, createFilesystem };
+export { read, write, modify, remove, list, glob, grep, exec, OutsideRootError, createLocalFilesystem, createRemoteFilesystem, createFilesystem };
+export default { read, write, modify, remove, list, glob, grep, exec, createLocalFilesystem, createRemoteFilesystem, createFilesystem };
