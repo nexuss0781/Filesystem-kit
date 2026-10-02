@@ -231,3 +231,18 @@ verified change. When an operation fails, its message names the constraint that
 was violated — an unknown path, a range past the end of the file, a `match`
 that is not there — and the call that fixes it is usually the one you just made
 with a different value.
+
+## Which machine
+
+These tools may be pointed at this computer or at a remote FileSystem Kit
+machine. You do not choose per call and you should not try to: the root is
+configured for you, and it is the same set of operations either way.
+
+Treat the root as one machine's disk. Paths start from it, `/` means the root of
+that machine, and nothing reaches outside. A path outside the root fails with
+`EOUTSIDE` rather than being rewritten, so if you see it, the path is wrong, not
+the permission.
+
+The one difference worth knowing is speed. A remote machine answers in roughly
+200ms and its first call after an idle stretch takes longer while it wakes up, so
+prefer fewer, larger operations over many tiny ones, and do not poll.

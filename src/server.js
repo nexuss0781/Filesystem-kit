@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { read, write, modify, remove, list, glob, grep } from './index.js';
@@ -16,6 +17,19 @@ function resolveRoot() {
 const root = resolveRoot();
 const port = Number(process.env.PORT || 3000);
 const bodyLimit = Number(process.env.JSON_BODY_LIMIT || 10 * 1024 * 1024);
+
+/**
+ * Set FSK_TOKEN to require a bearer token. Without it the service is open, which
+ * is convenient on localhost and wrong for a machine that holds real files.
+ */
+const token = process.env.FSK_TOKEN;
+
+function authorized(request) {
+  if (!token) return true;
+  const presented = Buffer.from(request.headers.authorization ?? '');
+  const expected = Buffer.from(`Bearer ${token}`);
+  return presented.length === expected.length && timingSafeEqual(presented, expected);
+}
 
 /**
  * The HTTP layer is Node's built-in server, so the whole package installs
@@ -70,6 +84,17 @@ function statusFor(error) {
   if (error.code === 'ERR_FS_EISDIR') return 400;
   if (error instanceof TypeError || error instanceof RangeError) return 400;
   return 500;
+}
+
+/**
+ * The code a local call would have thrown. A remote client rebuilds its error
+ * from this, so `error.code` means the same thing whichever machine ran the call.
+ */
+function codeFor(error, status) {
+  if (error.code) return error.code;
+  if (status === 404) return 'ENOENT';
+  if (status === 400) return 'EINVAL';
+  return 'E_INTERNAL';
 }
 
 function readBody(request) {
@@ -145,8 +170,11 @@ const routes = {
 export function createServer() {
   return http.createServer(async (request, response) => {
     const url = new URL(request.url, 'http://localhost');
+    if (!authorized(request)) {
+      return sendJson(response, 401, { error: 'unauthorized', code: 'E_UNAUTHORIZED', message: 'a bearer token is required' });
+    }
     const route = routes[`${request.method} ${url.pathname}`];
-    if (!route) return sendJson(response, 404, { error: 'not_found', message: 'route not found' });
+    if (!route) return sendJson(response, 404, { error: 'not_found', code: 'ENOENT', message: 'route not found' });
     try {
       const query = Object.fromEntries(url.searchParams);
       const body = request.method === 'PUT' || request.method === 'PATCH' ? await readBody(request) : {};
@@ -155,7 +183,12 @@ export function createServer() {
       return sendJson(response, result.status, result.json);
     } catch (error) {
       const status = statusFor(error);
-      return sendJson(response, status, { error: status >= 500 ? 'internal_error' : 'request_error', message: error.message });
+      return sendJson(response, status, {
+        error: status >= 500 ? 'internal_error' : 'request_error',
+        code: codeFor(error, status),
+        message: error.message,
+        ...(error.code === 'EOUTSIDE' ? { root: error.root } : {}),
+      });
     }
   });
 }
