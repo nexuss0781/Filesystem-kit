@@ -18,7 +18,22 @@
   },
   "license": "MIT",
   "keywords": ["filesystem", "files", "coding-agent", "cli", "automation"],
-  "dependencies": {
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nexuss0781/Filesystem-kit.git"
+  },
+  "bugs": {
+    "url": "https://github.com/nexuss0781/Filesystem-kit/issues"
+  },
+  "homepage": "https://github.com/nexuss0781/Filesystem-kit#readme",
+  "files": [
+    "src/index.js",
+    "src/cli.js",
+    "SKILL/",
+    "README.md",
+    "LICENSE"
+  ],
+  "devDependencies": {
     "express": "^5.1.0"
   }
 }
