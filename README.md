@@ -142,15 +142,17 @@ the content itself. Errors go to stderr with a non-zero exit code.
 
 ## HTTP server
 
-An Express service exposing the same operations over HTTP, for agents that reach
-a machine remotely.
+A service exposing the same operations over HTTP, for agents that reach a machine
+remotely. It is built on Node's own `node:http`, so the server has no dependencies
+either and the package installs nothing at all.
 
 ```bash
-FILESYSTEM_ROOT=/workspace PORT=3000 npm start
+FSK_ROOT=/workspace PORT=3000 npm start
 ```
 
 | Method | Endpoint | Body or query |
 | --- | --- | --- |
+| `GET` | `/` | service name, root, and route list |
 | `GET` | `/health` | service status and configured root |
 | `GET` | `/api/read` | `path`, `head`, `tail`, `start`, `end` |
 | `PUT` | `/api/write` | `path`, `content`, `append`, `range` |
@@ -160,23 +162,36 @@ FILESYSTEM_ROOT=/workspace PORT=3000 npm start
 | `GET` | `/api/glob` | `pattern`, `path`, `all` |
 | `GET` | `/api/grep` | `pattern`, `path`, `ignoreCase`, `all` |
 
-Paths are resolved inside `FILESYSTEM_ROOT` (default: the working directory) and
-reported back relative to it, so a client never sees a host path. Errors are
-JSON: `403` for a path outside the root, `404` for a missing file or route,
-`400` for an invalid argument.
+Paths are resolved inside the root and reported back relative to it, so a client
+never sees a host path. Errors are JSON: `403` for a path outside the root, `404`
+for a missing file or route, `400` for an invalid argument.
 
-Express is a `devDependency`, used only by the server. The library installs
-nothing. Because `exports` maps only the library entry point, run the service
-from a checkout of the repository rather than from an installed copy.
+The root is `FSK_ROOT`, then `FILESYSTEM_ROOT`, then the working directory.
+`FSK_ROOT` comes first because Wasmer Edge overrides `FILESYSTEM_ROOT` with its
+own scratch directory, which is not the mounted volume; trusting
+`FILESYSTEM_ROOT` there silently writes to ephemeral storage. Because `exports`
+maps only the library entry point, run the service from a checkout of the
+repository rather than from an installed copy.
 
 ### Wasmer persistence
 
 [`app.yaml`](https://github.com/nexuss0781/Filesystem-kit/blob/main/app.yaml)
-mounts a Wasmer volume at `/home/ubuntu` and sets `FILESYSTEM_ROOT` to match, so
-paths behave like a home directory and files survive restarts and scale-out. It
-is that container's home directory, not the host's. A deployment without the
-volume has an ephemeral filesystem and cannot keep state between requests —
-deploy with `wasmer deploy`, then check `/health` before exercising the API.
+mounts a Wasmer volume at `/home/ubuntu` and points the root there with
+`FSK_ROOT`, so paths behave like a home directory and files survive restarts,
+redeploys, and scale-out. It is that container's home directory, not the host's.
+A deployment without the volume has an ephemeral filesystem and cannot keep state
+between requests.
+
+Deploy from a checkout with `wasmer deploy --build-remote`, then check `/health`
+and confirm the reported `root` is `/home/ubuntu` before trusting any writes. Two
+Wasmer details are worth knowing:
+
+- `--build-remote` is required, because there is no `wasmer.toml` and a local
+  `package: .` will not build on its own.
+- `health_checks` is left out of `app.yaml`. The current CLI rejects the schema
+  published in the docs, failing with `invalid type: map, expected a
+  Value::Tagged enum`, so the deployment relies on `GET /` answering `200`
+  instead. Re-add it once the CLI accepts the documented shape.
 
 ## Skill
 
