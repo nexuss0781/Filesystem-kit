@@ -1,22 +1,28 @@
 kind: wasmer.io/App.v0
-owner: nexuss0781
 name: filesystem-kit
+app_id: da_RbxI9tgU67Lj
+owner: nexuss0781
 package: .
-
 env:
+  FSK_ROOT: /home/ubuntu
   FILESYSTEM_ROOT: /home/ubuntu
-
 volumes:
-  - name: data
-    mount: /home/ubuntu
-
-health_checks:
-  - http:
-      method: get
-      path: /health
-      interval: 30s
-      timeout: 10s
-      unhealthy_threshold: 2
-      healthy_threshold: 1
-      expected_status_codes:
-        - 200
+- name: data
+  mount: /home/ubuntu
+annotations:
+  anybuild.run/config:
+    commands:
+      start: node src/server.js
+    edgejs_enable: true
+    edgejs_precompile: true
+    name: out
+    node_install_inputs:
+    - package.json
+    node_package_manager: npm
+    node_package_name: filesystem-kit
+    node_remove_native_binaries: true
+    node_server: node
+    npm_version: '11'
+  anybuild.run/provider: node
+  anybuild.run/version: 0.32.0
+  wasmer.io/version: 7.5.0

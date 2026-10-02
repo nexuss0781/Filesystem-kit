@@ -2,13 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { rm } from 'node:fs/promises';
 import path from 'node:path';
-import { app } from '../src/server.js';
+import { createServer } from '../src/server.js';
 
 let server;
 let base;
 
 test.before(async () => {
-  server = app.listen(0, '127.0.0.1');
+  server = createServer().listen(0, '127.0.0.1');
   await new Promise((resolve) => server.once('listening', resolve));
   base = `http://127.0.0.1:${server.address().port}`;
 });
@@ -66,4 +66,25 @@ test('returns JSON errors for missing files and routes', async () => {
   response = await request('/missing-route');
   assert.equal(response.status, 404);
   assert.equal((await response.json()).error, 'not_found');
+});
+
+test('FSK_ROOT wins over FILESYSTEM_ROOT, which platforms may hijack', async () => {
+  const previousFsk = process.env.FSK_ROOT;
+  const previousLegacy = process.env.FILESYSTEM_ROOT;
+  const sandbox = path.join(process.cwd(), 'root-precedence');
+  process.env.FSK_ROOT = sandbox;
+  process.env.FILESYSTEM_ROOT = '/a/path/the/platform-made-up';
+
+  try {
+    const { createServer: createIsolated } = await import('../src/server.js?root-precedence');
+    const isolated = createIsolated().listen(0, '127.0.0.1');
+    await new Promise((resolve) => isolated.once('listening', resolve));
+    const response = await fetch(`http://127.0.0.1:${isolated.address().port}/health`);
+    assert.equal((await response.json()).root, sandbox);
+    await new Promise((resolve) => isolated.close(resolve));
+  } finally {
+    if (previousFsk === undefined) delete process.env.FSK_ROOT; else process.env.FSK_ROOT = previousFsk;
+    if (previousLegacy === undefined) delete process.env.FILESYSTEM_ROOT; else process.env.FILESYSTEM_ROOT = previousLegacy;
+    await rm(sandbox, { recursive: true, force: true });
+  }
 });

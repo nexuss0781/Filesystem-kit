@@ -1,6 +1,6 @@
 {
   "name": "filesystem-kit",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "A focused filesystem API and CLI for coding agents and research workflows.",
   "type": "module",
   "main": "src/index.js",
@@ -17,7 +17,13 @@
     "node": ">=20"
   },
   "license": "MIT",
-  "keywords": ["filesystem", "files", "coding-agent", "cli", "automation"],
+  "keywords": [
+    "filesystem",
+    "files",
+    "coding-agent",
+    "cli",
+    "automation"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/nexuss0781/Filesystem-kit.git"
@@ -29,11 +35,9 @@
   "files": [
     "src/index.js",
     "src/cli.js",
+    "src/server.js",
     "SKILL/",
     "README.md",
     "LICENSE"
-  ],
-  "devDependencies": {
-    "express": "^5.1.0"
-  }
+  ]
 }
