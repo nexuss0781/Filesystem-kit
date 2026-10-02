@@ -147,6 +147,16 @@ for (const backend of backends) {
     });
   });
 
+  test(`${label}: a reported path can be handed straight back`, async (t) => {
+    const { fsx, at } = await setup(t);
+    await fsx.write(at('round/trip.txt'), 'value');
+    const [entry] = await fsx.list(at('round'));
+    assert.equal(entry.path, `/${at('round')}/trip.txt`);
+    assert.equal(await fsx.read(entry.path), 'value');
+    await fsx.remove(entry.path);
+    await assert.rejects(() => fsx.read(entry.path), (error) => error.code === 'ENOENT');
+  });
+
   test(`${label}: describe reports which machine is in use`, async (t) => {
     const { fsx } = await setup(t);
     const described = await fsx.describe();

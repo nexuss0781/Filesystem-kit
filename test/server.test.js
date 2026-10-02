@@ -28,7 +28,7 @@ test('writes, reads, modifies, lists, greps, globs, and deletes over HTTP', asyn
   const file = 'http/sample.txt';
   let response = await request('/api/write', { method: 'PUT', body: JSON.stringify({ path: file, content: 'alpha\nbeta\ngamma' }) });
   assert.equal(response.status, 201);
-  assert.equal((await response.json()).path, file);
+  assert.equal((await response.json()).path, `/${file}`);
 
   response = await request(`/api/read?path=${encodeURIComponent(file)}&tail=1`);
   assert.equal(await response.text(), 'gamma');
@@ -40,7 +40,7 @@ test('writes, reads, modifies, lists, greps, globs, and deletes over HTTP', asyn
   assert.equal((await response.json())[0].line, 2);
 
   response = await request(`/api/glob?path=http&pattern=*.txt`);
-  assert.deepEqual(await response.json(), ['http/sample.txt']);
+  assert.deepEqual(await response.json(), ['/http/sample.txt']);
 
   response = await request('/api/list?path=http');
   assert.equal((await response.json())[0].name, 'sample.txt');

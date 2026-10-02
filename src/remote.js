@@ -17,6 +17,12 @@ const DEFAULT_RETRIES = 1;
  * `path` in results is the path on the *remote* machine, always starting with a
  * slash, so `/src/app.js` means the same thing here as it does locally.
  */
+/** The server already reports machine-relative paths; never double the slash. */
+function reported(value) {
+  const text = String(value ?? '');
+  return text.startsWith('/') ? text : `/${text}`;
+}
+
 function createRemoteFilesystem(options = {}) {
   const { baseUrl, url, token, timeout = DEFAULT_TIMEOUT, retries = DEFAULT_RETRIES, fetch: fetchImpl = globalThis.fetch } = options;
   const target = baseUrl ?? url;
@@ -111,7 +117,7 @@ function createRemoteFilesystem(options = {}) {
           range: writeOptions.range,
         },
       }), filePath);
-      return { path: `/${payload.path}`, bytes: payload.bytes };
+      return { path: reported(payload.path), bytes: payload.bytes };
     },
 
     async modify(filePath, modifyOptions = {}) {
@@ -129,28 +135,28 @@ function createRemoteFilesystem(options = {}) {
           range: modifyOptions.range,
         },
       }), filePath);
-      return { path: `/${payload.path}`, replacements: payload.replacements };
+      return { path: reported(payload.path), replacements: payload.replacements };
     },
 
     async remove(filePath, removeOptions = {}) {
       const payload = await json(await send('DELETE', '/api/delete', {
         query: { path: filePath, recursive: removeOptions.recursive === true, force: removeOptions.force === true },
       }), filePath);
-      return { path: `/${payload.path}`, removed: payload.removed };
+      return { path: reported(payload.path), removed: payload.removed };
     },
 
     async list(directory = '.', listOptions = {}) {
       const entries = await json(await send('GET', '/api/list', {
         query: { path: directory, all: listOptions.all === true },
       }), directory);
-      return entries.map((entry) => ({ ...entry, path: `/${entry.path}` }));
+      return entries.map((entry) => ({ ...entry, path: reported(entry.path) }));
     },
 
     async glob(pattern, globOptions = {}) {
       const matches = await json(await send('GET', '/api/glob', {
         query: { pattern: String(pattern), path: globOptions.path ?? '.', all: globOptions.all === true },
       }), String(pattern));
-      return matches.map((match) => `/${match}`);
+      return matches.map(reported);
     },
 
     async grep(pattern, grepOptions = {}) {
@@ -163,7 +169,7 @@ function createRemoteFilesystem(options = {}) {
           all: grepOptions.all === true,
         },
       }), String(pattern));
-      return matches.map((match) => ({ ...match, path: `/${match.path}` }));
+      return matches.map((match) => ({ ...match, path: reported(match.path) }));
     },
   };
 

@@ -146,7 +146,8 @@ Both expose `read`, `write`, `modify`, `remove`, `list`, `glob`, `grep`, and
 root is, which is worth knowing before writing anything to it.
 
 `path` in a result is always the path on that backend's own machine, starting
-with a slash, so `/notes/today.md` reads the same way on both.
+with a slash, so `/notes/today.md` reads the same way on both — and whatever a
+call hands back can be handed straight to the next one.
 
 ### Errors mean the same thing on both
 
@@ -260,6 +261,22 @@ Wasmer details are worth knowing:
 is given alongside these tools. It documents the root as a property of the
 machine rather than a rule to remember, and points at the operation to reach for
 in each situation.
+
+## Migrating to 3.0.0
+
+A `path` in a result is now the path on its own machine, starting with a slash,
+on both backends. Previously the local backend returned an absolute host path,
+which could not be handed back in: `list` gave you `/home/you/project/src`, and
+reading that treated it as the machine's own `home/you/project/src`.
+
+| 2.x | 3.0.0 |
+| --- | --- |
+| local results were absolute host paths | results are machine-relative on both backends |
+| a returned path could not be read back | every reported path is valid input |
+| `glob` reported paths relative to the searched subtree | reports from the machine root |
+
+If you were comparing a local result against `path.resolve`, compare against the
+leading-slash form instead.
 
 ## Migrating from 1.0.0
 
