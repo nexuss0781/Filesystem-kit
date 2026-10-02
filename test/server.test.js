@@ -39,7 +39,7 @@ test('writes, reads, modifies, lists, greps, globs, and deletes over HTTP', asyn
   response = await request(`/api/grep?path=http&pattern=BETA`);
   assert.equal((await response.json())[0].line, 2);
 
-  response = await request(`/api/glob?cwd=http&pattern=*.txt`);
+  response = await request(`/api/glob?path=http&pattern=*.txt`);
   assert.deepEqual(await response.json(), ['http/sample.txt']);
 
   response = await request('/api/list?path=http');
@@ -52,7 +52,11 @@ test('writes, reads, modifies, lists, greps, globs, and deletes over HTTP', asyn
 test('rejects traversal outside the configured root', async () => {
   const response = await request('/api/read?path=../../etc/passwd');
   assert.equal(response.status, 403);
-  assert.equal((await response.json()).message, 'path must stay inside FILESYSTEM_ROOT');
+  const body = await response.json();
+  assert.equal(body.error, 'request_error');
+  assert.match(body.message, /outside the root/);
+  const write = await request('/api/write', { method: 'PUT', body: JSON.stringify({ path: '../escape.txt', content: 'nope' }) });
+  assert.equal(write.status, 403);
 });
 
 test('returns JSON errors for missing files and routes', async () => {
