@@ -188,10 +188,12 @@ Wasmer details are worth knowing:
 
 - `--build-remote` is required, because there is no `wasmer.toml` and a local
   `package: .` will not build on its own.
-- `health_checks` is left out of `app.yaml`. The current CLI rejects the schema
-  published in the docs, failing with `invalid type: map, expected a
-  Value::Tagged enum`, so the deployment relies on `GET /` answering `200`
-  instead. Re-add it once the CLI accepts the documented shape.
+- `health_checks` is left out of `app.yaml` on purpose. The shape published in
+  the Wasmer docs is rejected by the CLI with `invalid type: map, expected a
+  Value::Tagged enum`. This was reproduced on both 7.4.2 and 7.5.0, and against
+  a minimal two-field entry, so it is a Wasmer bug rather than a version skew or
+  a mistake in the manifest. The deployment instead relies on `GET /` answering
+  `200`, which is what the platform probes after a deploy.
 
 ## Skill
 
