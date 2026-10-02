@@ -28,6 +28,20 @@ function resolveInRoot(filePath, options = {}) {
   return resolved;
 }
 
+/**
+ * The path a result reports.
+ *
+ * It is the path on this machine, starting with a slash, which is exactly what
+ * every function here accepts back as input. An absolute host path would look
+ * more informative and be a trap: `list` hands you `/home/you/project/src`, and
+ * feeding that straight back in would be read as the machine's own
+ * `home/you/project/src` and miss.
+ */
+function reported(root, fullPath) {
+  const relativePath = path.relative(root, fullPath);
+  return `/${relativePath}`.replace(/\/+$/, '') || '/';
+}
+
 function linesOf(content) {
   return content.split('\n');
 }
@@ -123,7 +137,7 @@ async function writeResolved(fullPath, content, options = {}) {
   }
   if (options.createDirs !== false) await fs.mkdir(path.dirname(fullPath), { recursive: true });
   await fs.writeFile(fullPath, content, { encoding: options.encoding ?? DEFAULT_ENCODING, flag: options.append ? 'a' : 'w' });
-  return { path: fullPath, bytes: Buffer.byteLength(content) };
+  return { path: reported(rootOf(options), fullPath), bytes: Buffer.byteLength(content) };
 }
 
 async function write(filePath, content, options = {}) {
@@ -149,7 +163,7 @@ async function modify(filePath, options = {}) {
   });
   if (!found) throw new Error(`match not found: ${options.match}`);
   await fs.writeFile(fullPath, updated, 'utf8');
-  return { path: fullPath, replacements: 1 };
+  return { path: reported(rootOf(options), fullPath), replacements: 1 };
 }
 
 async function remove(filePath, options = {}) {
@@ -157,16 +171,17 @@ async function remove(filePath, options = {}) {
   const stat = await fs.lstat(fullPath);
   if (stat.isDirectory()) await fs.rm(fullPath, { recursive: options.recursive ?? false, force: options.force ?? false });
   else await fs.unlink(fullPath);
-  return { path: fullPath, removed: true };
+  return { path: reported(rootOf(options), fullPath), removed: true };
 }
 
 async function list(directory = '.', options = {}) {
-  const root = resolveInRoot(directory, options);
-  const entries = await fs.readdir(root, { withFileTypes: true });
+  const base = rootOf(options);
+  const target = resolveInRoot(directory, options);
+  const entries = await fs.readdir(target, { withFileTypes: true });
   const result = [];
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
     if (!options.all && entry.name.startsWith('.')) continue;
-    result.push({ name: entry.name, path: path.join(root, entry.name), type: entry.isDirectory() ? 'directory' : entry.isFile() ? 'file' : 'other' });
+    result.push({ name: entry.name, path: reported(base, path.join(target, entry.name)), type: entry.isDirectory() ? 'directory' : entry.isFile() ? 'file' : 'other' });
   }
   return result;
 }
@@ -207,11 +222,12 @@ function globToRegExp(pattern) {
 
 /** `path` is the subtree to search. It is resolved inside the root like everything else. */
 async function glob(pattern, options = {}) {
-  const root = resolveInRoot(options.path ?? '.', options);
-  const files = await walk(root, options.all);
+  const base = rootOf(options);
+  const target = resolveInRoot(options.path ?? '.', options);
+  const files = await walk(target, options.all);
   const relativePattern = pattern.replace(/^\/+/, '').replaceAll(path.sep, '/').replace(/^\.\//, '');
   const matcher = globToRegExp(relativePattern);
-  return files.filter((entry) => matcher.test(path.relative(root, entry).replaceAll(path.sep, '/'))).sort();
+  return files.filter((entry) => matcher.test(path.relative(target, entry).replaceAll(path.sep, '/'))).sort().map((entry) => reported(base, entry));
 }
 
 /** `path` is the file or subtree to search. It is resolved inside the root like everything else. */
@@ -228,7 +244,7 @@ async function grep(pattern, options = {}) {
     if (content == null || content.includes('\u0000')) continue;
     content.split('\n').forEach((line, index) => {
       sourceMatcher.lastIndex = 0;
-      if (sourceMatcher.test(line)) results.push({ path: file, line: index + 1, text: line });
+      if (sourceMatcher.test(line)) results.push({ path: reported(rootOf(options), file), line: index + 1, text: line });
     });
   }
   return results;

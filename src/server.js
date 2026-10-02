@@ -68,15 +68,6 @@ function rangeFrom(source) {
   return { start: source.start == null ? undefined : Number(source.start), end: source.end == null ? undefined : Number(source.end) };
 }
 
-function publicPath(filePath) {
-  return path.relative(root, filePath) || '.';
-}
-
-function publicResult(result) {
-  if (Array.isArray(result)) return result.map((item) => (item.path ? { ...item, path: publicPath(item.path) } : item));
-  return result && result.path ? { ...result, path: publicPath(result.path) } : result;
-}
-
 function statusFor(error) {
   if (error.status) return error.status;
   if (error.code === 'ENOENT') return 404;
@@ -147,24 +138,24 @@ const routes = {
 
   'PUT /api/write': async (_query, body) => {
     const result = await write(requirePath(body.path), body.content ?? '', { cwd: root, append: bool(body.append), range: body.range, createDirs: body.createDirs !== false });
-    return { status: 201, json: publicResult(result) };
+    return { status: 201, json: result };
   },
 
   'PATCH /api/modify': async (_query, body) => {
     const result = await modify(requirePath(body.path), { cwd: root, match: body.match, replacement: body.replacement, occurrence: body.occurrence, rewrite: body.rewrite, range: body.range });
-    return { status: 200, json: publicResult(result) };
+    return { status: 200, json: result };
   },
 
   'DELETE /api/delete': async (query) => {
     const result = await remove(requirePath(query.path), { cwd: root, recursive: bool(query.recursive), force: bool(query.force) });
-    return { status: 200, json: publicResult(result) };
+    return { status: 200, json: result };
   },
 
-  'GET /api/list': async (query) => ({ status: 200, json: publicResult(await list(optionalPath(query.path), { cwd: root, all: bool(query.all) })) }),
+  'GET /api/list': async (query) => ({ status: 200, json: await list(optionalPath(query.path), { cwd: root, all: bool(query.all) }) }),
 
-  'GET /api/glob': async (query) => ({ status: 200, json: (await glob(String(query.pattern || ''), { cwd: root, path: optionalPath(query.path), all: bool(query.all) })).map(publicPath) }),
+  'GET /api/glob': async (query) => ({ status: 200, json: await glob(String(query.pattern || ''), { cwd: root, path: optionalPath(query.path), all: bool(query.all) }) }),
 
-  'GET /api/grep': async (query) => ({ status: 200, json: publicResult(await grep(String(query.pattern || ''), { cwd: root, path: optionalPath(query.path), ignoreCase: bool(query.ignoreCase), all: bool(query.all) })) }),
+  'GET /api/grep': async (query) => ({ status: 200, json: await grep(String(query.pattern || ''), { cwd: root, path: optionalPath(query.path), ignoreCase: bool(query.ignoreCase), all: bool(query.all) }) }),
 };
 
 export function createServer() {

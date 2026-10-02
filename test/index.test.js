@@ -56,8 +56,8 @@ test('lists, globs, greps, and deletes', async () => {
   await write('src/a.js', 'const apple = 1;', { cwd: root });
   await write('src/b.txt', 'banana', { cwd: root });
   assert.deepEqual((await list('src', { cwd: root })).map((entry) => entry.name), ['a.js', 'b.txt']);
-  assert.deepEqual((await glob('src/*.js', { cwd: root })).map((p) => path.relative(root, p)), ['src/a.js']);
-  assert.deepEqual((await glob('*.js', { cwd: root, path: 'src' })).map((p) => path.relative(root, p)), ['src/a.js']);
+  assert.deepEqual(await glob('src/*.js', { cwd: root }), ['/src/a.js']);
+  assert.deepEqual(await glob('*.js', { cwd: root, path: 'src' }), ['/src/a.js']);
   assert.equal((await grep(/apple/g, { cwd: root, path: '.' }))[0].line, 1);
   await remove('src', { cwd: root, recursive: true });
   await assert.rejects(() => list('src', { cwd: root }));
@@ -86,7 +86,7 @@ test('a leading slash names the root of the machine', async () => {
   assert.equal(await read('/src/app.js', { cwd: root }), 'const mode = 1;');
   assert.equal(await read('src/app.js', { cwd: root }), 'const mode = 1;');
   assert.equal((await list('/', { cwd: root }))[0].name, 'src');
-  assert.deepEqual((await glob('/src/*.js', { cwd: root })).map((p) => path.relative(root, p)), ['src/app.js']);
+  assert.deepEqual(await glob('/src/*.js', { cwd: root }), ['/src/app.js']);
   await modify('/src/app.js', { cwd: root, match: 'mode', replacement: 'setting' });
   assert.equal(await read('/src/app.js', { cwd: root }), 'const setting = 1;');
   await remove('/src', { cwd: root, recursive: true });
@@ -122,7 +122,7 @@ test('glob spans zero or more folders', async () => {
   await write('src/deep/b.js', 'b', { cwd: root });
   await write('src/deep/deeper/c.js', 'c', { cwd: root });
   await write('src/notes.md', 'n', { cwd: root });
-  const rel = (found) => found.map((p) => path.relative(root, p));
+  const rel = (found) => found.map((p) => p.slice(1));
   assert.deepEqual(rel(await glob('src/*.js', { cwd: root })), ['src/a.js']);
   assert.deepEqual(rel(await glob('src/**/*.js', { cwd: root })), ['src/a.js', 'src/deep/b.js', 'src/deep/deeper/c.js']);
   assert.deepEqual(rel(await glob('**/*.js', { cwd: root })), ['src/a.js', 'src/deep/b.js', 'src/deep/deeper/c.js']);
